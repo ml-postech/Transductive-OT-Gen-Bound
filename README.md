@@ -1,6 +1,6 @@
 # Transductive Generalization via Optimal Transport and Its Application to Graph Node Classification
 
-Official implementation of Transductive Generalization via Optimal Transport and Its Application to Graph Node Classification.
+Official implementation of [Transductive Generalization via Optimal Transport and Its Application to Graph Node Classification](https://arxiv.org/abs/2603.09257).
 
 ## Overview
 
