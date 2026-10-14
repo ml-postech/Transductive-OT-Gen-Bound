@@ -1,0 +1,8 @@
+torch>=1.12
+torch_geometric>=2.3
+torch_scatter
+torchvision
+POT>=0.9
+scikit-learn>=1.0
+scipy
+numpy

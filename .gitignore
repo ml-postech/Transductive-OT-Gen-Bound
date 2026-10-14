@@ -67,3 +67,6 @@ data/**/raw/*.pt
 # Experiments outputs (optional, uncomment if needed)
 # fig_src/
 # fig_gen_code/
+
+# Experiment outputs
+results/
