@@ -5,7 +5,8 @@ the parts that are specific to *this* paper, namely how :math:`R` is estimated w
 2% of the pool is labelled.
 
 :mod:`~otbound.ssl.algorithms` is a skeleton.  The four semi-supervised methods
-themselves are not in this repository yet -- see the checklist at the top of the README.
+themselves are not in this repository yet; see that module for the interface they need
+to satisfy.
 """
 
 from .algorithms import (SSL_ALGORITHMS, SSLAlgorithm, SSLStepOutput,

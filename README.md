@@ -16,7 +16,7 @@ We bound the transductive generalization gap of a node classifier with optimal t
 - **Analyzing depth.** Intra-class concentration $W_C$ and inter-class separation $W_S$ are tracked as message passing deepens (Figure 1). This accounts for the non-monotone relationship between depth and generalization.
 - **Regularizing** training with a differentiable surrogate of the bound (Table 2), with ablations of its two factors (Table 12).
 - **The global bound** (Theorem 4), a coarser variant that compares the training and test feature distributions as wholes rather than class by class, both as a measure (Table 6) and as a regularizer (Table 7).
-- **Semi-supervised learning** with the regularizer added on top of standard SSL algorithms (Section 6; coming soon, see [Status](#status)).
+- **Semi-supervised learning** with the regularizer added on top of standard SSL algorithms (Section 6). The hooks this needs are in `otbound/ssl/`; the SSL algorithms themselves are not included yet, so `experiments/semisup.py` is a skeleton and raises `NotImplementedError`.
 
 ## Installation
 
@@ -159,17 +159,6 @@ python experiments/tabular_regularize.py --dataset cifar10 --net rescnn --reg_we
 | `--global_quantile` | order statistic standing in for the maximum in M(f, φ) | 0.9 |
 
 Each script sets its own defaults to match the protocol in the paper. Run `python experiments/<script>.py --help` for the full list.
-
-## Status
-
-- [x] OT bound, oracle and test-blind estimators (Theorem 1)
-- [x] Global bound (Theorem 4), as a measure and as a regularizer
-- [x] Baselines: PAC-Bayes, Rademacher, uniform stability
-- [x] Depth analysis ($W_C$, $W_S$)
-- [x] OT regularizer: graphs, tabular and image data
-- [x] Regularizer factor ablation and hyperparameter sensitivity
-- [x] Link prediction
-- [ ] Semi-supervised experiments (Section 6). `otbound/ssl/buffer.py` and `otbound/ssl/regularizer.py` are complete. The four SSL algorithms in `otbound/ssl/algorithms.py` and the data pipeline in `experiments/semisup.py` are still skeletons and raise `NotImplementedError`; the full implementation will be added soon.
 
 ## Citation
 

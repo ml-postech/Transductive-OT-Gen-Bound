@@ -2,7 +2,7 @@
 
 Tables 3 and 4 evaluate the OT bound and the OT regularizer on top of four
 semi-supervised methods.  That code is not part of this repository yet (see the
-checklist at the top of the README); what is here is the interface it needs to satisfy,
+coauthor's repository); what is here is the interface it needs to satisfy,
 so that :mod:`otbound.bound` and :mod:`otbound.ssl.regularizer` can be dropped in
 without touching them.
 
@@ -79,7 +79,7 @@ class SSLAlgorithm(object):
                 expects (FixMatch and SimMatch want weak and strong views).
         """
         raise NotImplementedError(
-            "{}.compute_loss is not implemented yet; see the README checklist".format(
+            "{}.compute_loss is not implemented yet; see this module's docstring".format(
                 type(self).__name__)
         )
 

@@ -2,7 +2,7 @@
 
 Section 6 evaluates the bound and the regularizer on top of four semi-supervised
 algorithms on CIFAR-10 and SVHN at a 2% label budget.  The algorithms themselves are not
-in this repository yet (see the checklist at the top of the README); this file is the
+in this repository yet; this file is the
 driver they plug into, so that finishing them is a matter of implementing
 :meth:`otbound.ssl.algorithms.SSLAlgorithm.compute_loss` rather than rewriting the
 measurement.
@@ -42,7 +42,7 @@ def build_dataloaders(dataset, labeled_fraction, seed, args):
     transductive.
     """
     raise NotImplementedError(
-        "semi-supervised data pipeline not implemented; see the README checklist"
+        "semi-supervised data pipeline not implemented; see the module docstring"
     )
 
 
