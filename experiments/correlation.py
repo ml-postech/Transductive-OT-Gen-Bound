@@ -3,7 +3,7 @@
 One invocation trains a single (architecture, depth, dataset) configuration, averages
 the bound and the generalization gap over ``--runs`` random splits, and appends a row to
 ``--result_csv``.  The rank correlation itself is computed across the 18 configurations
-that Appendix E.1 prescribes -- encoder depth in {1, 2, 4, 8, 16, 32} crossed with
+that Appendix H.1 prescribes -- encoder depth in {1, 2, 4, 8, 16, 32} crossed with
 classifier depth in {1, 2, 4} -- so sweep those and correlate the resulting rows.
 
 Reported per row:
@@ -11,12 +11,18 @@ Reported per row:
 ``gen_error``
     :math:`|R_u - R_m|`, the empirical generalization gap on 0-1 loss.
 ``ot_oracle`` / ``ot_bound``
-    Theorem 1 with and without access to test labels (Appendix B).
+    Theorem 1 with and without access to test labels (Appendix C).
 ``pac_bound``
     The PAC-Bayesian baseline.
 ``rc_bound``
     The Rademacher baseline of Esser et al. (2021).  Only defined for SGC and GCN with
     no classifier head, so it requires ``--net sgc|gcn --c_depth 0 --baseline_rc 1``.
+``global_bound``
+    Theorem 4 (Appendix A), reported in Table 6.  Select it with ``--bound global``, or
+    ``--bound both`` to get it alongside Theorem 1 from the same trained model.
+
+The estimation procedure for the expectation over :math:`\\pi'` is in Appendix C; the
+training protocol is in Appendix H.1.
 """
 
 import argparse
@@ -24,7 +30,7 @@ import argparse
 from _common import (SEEDS, add_common_args, append_csv_row, get_device, summarize)
 
 from otbound.baselines import pac_bayes_bound, rademacher_bound
-from otbound.bound import ot_bound
+from otbound.bound import global_bound, ot_bound
 from otbound.data import load_graph_dataset
 from otbound.margin import margins_all, margins_true
 from otbound.models import build_model
@@ -61,12 +67,23 @@ def run_once(args, dataset, device, seed):
         )
         return result
 
-    bounds = ot_bound(
-        features, margins_all(logits), data.y, data.train_mask, data.test_mask,
-        dataset.num_classes, n_permutations=args.n_permutations, gamma=args.gamma,
-    )
-    result["ot_oracle"] = bounds["oracle"]
-    result["ot_bound"] = bounds["test_blind"]
+    margin_all = margins_all(logits)
+
+    if args.bound in ("classwise", "both"):
+        bounds = ot_bound(
+            features, margin_all, data.y, data.train_mask, data.test_mask,
+            dataset.num_classes, n_permutations=args.n_permutations, gamma=args.gamma,
+        )
+        result["ot_oracle"] = bounds["oracle"]
+        result["ot_bound"] = bounds["test_blind"]
+
+    if args.bound in ("global", "both"):
+        # Theorem 4 needs no test labels and no pi' sampling, so there is a single value
+        # rather than an oracle / test-blind pair.
+        result["global_bound"] = global_bound(
+            features, margin_all, data.y, data.train_mask, data.test_mask,
+            quantile=args.global_quantile, gamma=args.gamma,
+        )["bound"]
 
     if args.baseline_pac:
         result["pac_bound"] = pac_bayes_bound(model, int(data.train_mask.sum()))
@@ -78,9 +95,17 @@ def main():
     add_common_args(parser)
     parser.add_argument("--n_permutations", type=int, default=4,
                         help="number of pi' samples T used to estimate the expectation "
-                             "in Theorem 1 (Appendix B uses 4)")
+                             "in Theorem 1 (Appendix C uses 4)")
     parser.add_argument("--gamma", type=float, default=1.0,
                         help="margin threshold; the bound carries a 1/gamma factor")
+    parser.add_argument("--bound", type=str, default="classwise",
+                        choices=["classwise", "global", "both"],
+                        help="'classwise' is Theorem 1 (Table 1), 'global' Theorem 4 "
+                             "(Appendix D.1, Table 6)")
+    parser.add_argument("--global_quantile", type=float, default=0.9,
+                        help="order statistic standing in for the maximum in M(f, phi); "
+                             "1.0 gives the maximum of Theorem 4 itself, while the "
+                             "Appendix D experiments use 0.9")
     parser.add_argument("--baseline_pac", type=int, default=1)
     parser.add_argument("--baseline_rc", type=int, default=0,
                         help="compute the Rademacher bound instead of the OT bound; "

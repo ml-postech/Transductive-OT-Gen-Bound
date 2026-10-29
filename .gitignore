@@ -70,3 +70,5 @@ data/**/raw/*.pt
 
 # Experiment outputs
 results/
+
+camera_ready.pdf

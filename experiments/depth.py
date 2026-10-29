@@ -1,4 +1,4 @@
-"""Figure 1 and Appendix C.3: how feature geometry and generalization vary with depth.
+"""Figure 1 and Appendix E.2: how feature geometry and generalization vary with depth.
 
 Trains one encoder at one depth and records the three quantities Figure 1 plots:
 
@@ -16,7 +16,7 @@ Trains one encoder at one depth and records the three quantities Figure 1 plots:
 (2021), the depth-monotone comparison discussed in Section 5.3.
 
 Sweep ``--e_depth`` over {1, 4, 8, 12, 16, 20, 24, 28, 32} for one dataset and encoder
-to reproduce one panel; Appendix E.2 fixes a two-layer classifier, hidden dimension 64,
+to reproduce one panel; Appendix H.2 fixes a two-layer classifier, hidden dimension 64,
 a 30/70 split with no validation set, and 5 random splits.
 """
 

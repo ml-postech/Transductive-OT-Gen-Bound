@@ -39,6 +39,9 @@ __all__ = [
     "max_change_class",
     "soft_max_change_class",
     "change_rate_support",
+    "global_change_rate",
+    "soft_global_change_rate",
+    "soft_quantile",
 ]
 
 # Pairs closer than this in feature space are dropped: the ratio is numerically
@@ -194,3 +197,167 @@ def soft_max_change_class(features, margin_all, c, temperature=1.0, n_sample=200
 
     rates = margin_diffs / feature_dists.clamp(min=_MIN_FEATURE_DIST)
     return _soft_max(rates[valid], temperature)
+
+
+# ============================================================================
+# The global change-rate factor M(f, phi)  (Theorem 4, Appendix A)
+# ============================================================================
+#
+# The global bound replaces the K class-wise factors with a single one,
+#
+#     M(f, phi) := max_{i, j, y}
+#         |rho_f(phi(x_i), y_i) - rho_f(phi(x_j), y)| / ||phi(x_i) - phi(x_j)||,
+#         i in I_train,  j in I_test,  y in Y.
+#
+# Note the asymmetry between the two sides, which is what makes this computable
+# without test labels: the training node contributes the margin at its *observed*
+# label y_i, while the test node contributes every hypothetical label y in Y.
+# Because Y is finite, enumerating y gives a valid upper bound.
+
+def _global_rate_blocks(features, margin_all, y, train_mask, test_mask, batch_size=None):
+    """Yield blocks of global change rates, shaped ``[b, n_test, K]``.
+
+    Blocked over training nodes so the ``[n_train, n_test, K]`` tensor is never
+    materialized in full.
+    """
+    train_idx = train_mask.nonzero(as_tuple=True)[0]
+    test_idx = test_mask.nonzero(as_tuple=True)[0]
+    if len(train_idx) == 0 or len(test_idx) == 0:
+        return
+
+    train_features, test_features = features[train_idx], features[test_idx]
+    train_margins, test_margins = margin_all[train_idx], margin_all[test_idx]
+    train_labels = y.squeeze()[train_idx]
+
+    n_train, n_test, K = len(train_idx), len(test_idx), margin_all.shape[1]
+    if batch_size is None:
+        # Keep the per-block tensor near 100MB in float32.
+        batch_size = max(1, min(n_train, int(1e8 / max(n_test * K * 4, 1))))
+
+    # The margin of each training node at its own observed label: [n_train, 1].
+    train_margin_at_label = train_margins.gather(1, train_labels.unsqueeze(1))
+
+    for i in range(0, n_train, batch_size):
+        end = min(i + batch_size, n_train)
+        block_features = train_features[i:end]
+        block_margin = train_margin_at_label[i:end]
+
+        dists = torch.norm(
+            block_features.unsqueeze(1) - test_features.unsqueeze(0), dim=2
+        )  # [b, n_test]
+        # Near-duplicate pairs would divide by ~0; a huge denominator sends their
+        # rate to ~0 so they neither win the max nor distort the quantile.
+        dists = dists.masked_fill(dists < _MIN_FEATURE_DIST, 1e10)
+
+        # [b, 1, 1] - [1, n_test, K] -> [b, n_test, K]
+        margin_diffs = torch.abs(
+            block_margin.unsqueeze(2) - test_margins.unsqueeze(0)
+        )
+        yield margin_diffs / dists.unsqueeze(2)
+
+
+def global_change_rate(features, margin_all, y, train_mask, test_mask, quantile=1.0,
+                       batch_size=None, per_block_samples=5000, max_samples=50000,
+                       generator=None):
+    """:math:`M(f, \\phi)` of Theorem 4, or a high percentile of it.
+
+    Args:
+        quantile: ``1.0`` returns the exact maximum over all ``(i, j, y)``, which is
+            :math:`M(f, \\phi)` as Theorem 4 states it.  A value below 1 returns that
+            percentile of the change-rate distribution instead.  **The experiments in
+            Appendix D use 0.9**: the maximum is attained by a handful of outlier pairs
+            and tracks generalization less well, so the reported quantity is a proxy for
+            :math:`M(f, \\phi)` rather than a valid upper bound on it.
+        batch_size: training nodes per block; chosen from memory when ``None``.
+        per_block_samples, max_samples: the rate distribution has
+            ``n_train * n_test * K`` entries, far too many to hold, so percentiles are
+            taken over a random subsample -- at most ``per_block_samples`` per block and
+            ``max_samples`` overall.  Ignored when ``quantile == 1.0``.
+        generator: optional :class:`torch.Generator` for reproducible subsampling.
+
+    Returns:
+        float: the requested statistic, or 0.0 if either side is empty.
+    """
+    max_rate = 0.0
+    reservoir = []
+
+    for rates in _global_rate_blocks(features, margin_all, y, train_mask, test_mask,
+                                     batch_size):
+        max_rate = max(max_rate, float(rates.max()))
+
+        if quantile < 1.0:
+            flat = rates.flatten().detach()
+            if len(flat) > 2 * per_block_samples:
+                keep = torch.randperm(len(flat), device=flat.device,
+                                      generator=generator)[:per_block_samples]
+                flat = flat[keep]
+            reservoir.append(flat.cpu())
+
+        del rates
+        if features.device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    if quantile >= 1.0:
+        return max_rate
+    if not reservoir:
+        return 0.0
+
+    pooled = torch.cat(reservoir, dim=0)
+    if len(pooled) > max_samples:
+        keep = torch.randperm(len(pooled), generator=generator)[:max_samples]
+        pooled = pooled[keep]
+    return float(torch.quantile(pooled, quantile))
+
+
+def soft_quantile(values, quantile, temperature=1.0):
+    """Differentiable approximation of a quantile of ``values``.
+
+    The ``q``-th quantile is the largest of the smallest ``ceil(q n)`` values, so a
+    soft-max over that bottom slice approximates it.  The slice is selected under
+    ``no_grad`` and then indexed out of the gradient-carrying tensor, so gradient
+    reaches the selected values -- concentrated, as it should be, on those near the
+    quantile boundary.
+
+    ``quantile >= 1`` reduces to :func:`_soft_max` over everything.
+    """
+    if quantile >= 1.0:
+        return _soft_max(values, temperature)
+
+    k = max(1, int(torch.ceil(torch.tensor(quantile * len(values))).item()))
+    with torch.no_grad():
+        _, bottom_idx = torch.topk(values.detach(), k, largest=False)
+    return _soft_max(values[bottom_idx], temperature)
+
+
+def soft_global_change_rate(train_features, train_margin_all, train_y,
+                            test_features, test_margin_all, quantile=0.9,
+                            temperature=1.0, n_sample=200, generator=None):
+    """Differentiable surrogate for :math:`M(f, \\phi)`, for the global regularizer.
+
+    Mirrors :func:`global_change_rate` -- the training side contributes the margin at
+    its observed label, the test side every hypothetical label -- with two
+    approximations, as in :func:`soft_max_change_class`: the order statistic is smoothed
+    (:func:`soft_quantile`) and the pairs come from a random subsample of at most
+    ``n_sample`` points per side.
+
+    Returns:
+        torch.Tensor: a scalar, differentiable with respect to the features and margins.
+    """
+    n_train, n_test = train_features.shape[0], test_features.shape[0]
+    if n_train == 0 or n_test == 0:
+        return train_features.new_zeros(())
+
+    device = train_features.device
+    tr = torch.randperm(n_train, device=device, generator=generator)[:min(n_sample, n_train)]
+    te = torch.randperm(n_test, device=device, generator=generator)[:min(n_sample, n_test)]
+
+    f_tr, f_te = train_features[tr], test_features[te]
+    # Margin of each sampled training point at its own label: [n_tr, 1].
+    m_tr = train_margin_all[tr].gather(1, train_y[tr].unsqueeze(1))
+    m_te = test_margin_all[te]  # [n_te, K]
+
+    dists = torch.cdist(f_tr, f_te, p=2).clamp(min=_MIN_FEATURE_DIST)  # [n_tr, n_te]
+    margin_diffs = torch.abs(m_tr.unsqueeze(2) - m_te.unsqueeze(0))    # [n_tr, n_te, K]
+    rates = margin_diffs / dists.unsqueeze(2)
+
+    return soft_quantile(rates.reshape(-1), quantile, temperature)

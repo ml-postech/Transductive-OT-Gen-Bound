@@ -10,7 +10,7 @@ Two loaders, one per family of experiments:
                                used in the transductive setting of Section 6.
 =============================  ==========================================================
 
-Split protocol (Appendix E.1), shared by both loaders:
+Split protocol (Appendix H.1), shared by both loaders:
 
 * ``use_val=True``  -- 60% / 20% / 20% train / val / test.  The heterophilic datasets
   keep their own published splits instead.

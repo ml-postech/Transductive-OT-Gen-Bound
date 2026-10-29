@@ -9,7 +9,7 @@ measurement.
 
 Everything specific to *this paper* is already implemented and wired up below:
 
-* :class:`~otbound.ssl.buffer.LabeledFeatureBuffer` -- the Appendix E.3 buffer that
+* :class:`~otbound.ssl.buffer.LabeledFeatureBuffer` -- the Appendix H.3 buffer that
   widens the labelled side of :math:`R`, since a 2%-label mini-batch holds too few
   points per class for a stable per-class :math:`W_1`;
 * :func:`~otbound.ssl.regularizer.ssl_ot_regularizer` -- assembling :math:`R` from a
@@ -18,7 +18,7 @@ Everything specific to *this paper* is already implemented and wired up below:
 
 What is missing is marked ``TODO`` and raises rather than silently producing numbers.
 
-Appendix E.3 protocol: 2% of the pool labelled, class-balanced (1,200 labels for
+Appendix H.3 protocol: 2% of the pool labelled, class-balanced (1,200 labels for
 CIFAR-10, 2,000 for SVHN); each algorithm keeps the architecture, optimizer, learning
 rate and batch size of its own paper; reported accuracy is the median over the last few
 checkpoints, averaged over 5 runs, following the Unified SSL Benchmark convention.
@@ -37,7 +37,7 @@ def build_dataloaders(dataset, labeled_fraction, seed, args):
     FixMatch and SimMatch need.
 
     Must return ``(labeled_loader, unlabeled_loader, eval_loader)``.  The split has to be
-    class-balanced -- Appendix E.3 takes the same number of labels per class -- and the
+    class-balanced -- Appendix H.3 takes the same number of labels per class -- and the
     unlabelled pool is the remainder of the *same* dataset, since the setting is
     transductive.
     """
@@ -87,7 +87,7 @@ def train(args, dataset, device, seed):
 
     raise NotImplementedError(
         "evaluation loop not implemented: report the median accuracy over the last "
-        "few checkpoints, per Appendix E.3"
+        "few checkpoints, per Appendix H.3"
     )
 
 
@@ -99,10 +99,10 @@ def main():
     parser.add_argument("--algorithm", type=str, required=True,
                         choices=["lp_deepssl", "mean_teacher", "fixmatch", "simmatch"])
     parser.add_argument("--labeled_fraction", type=float, default=0.02,
-                        help="fraction of the pool that is labelled (Appendix E.3: 0.02)")
+                        help="fraction of the pool that is labelled (Appendix H.3: 0.02)")
     parser.add_argument("--buffer_batches", type=int, default=4,
                         help="labelled mini-batches retained for the per-class W1 "
-                             "estimate (Appendix E.3: 4)")
+                             "estimate (Appendix H.3: 4)")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=0.03)
     parser.add_argument("--weight_decay", type=float, default=5e-4)

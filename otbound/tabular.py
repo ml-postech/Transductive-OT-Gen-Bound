@@ -1,4 +1,4 @@
-"""Encoders and classifiers for the non-graph experiments (Section 6, Appendix D).
+"""Encoders and classifiers for the non-graph experiments (Section 6, Appendix G).
 
 The bound is stated for a general encoder :math:`\\phi : \\mathcal{X} \\to \\mathcal{Z}`;
 nothing about it is graph-specific.  These are the tabular and image counterparts of
@@ -6,8 +6,8 @@ nothing about it is graph-specific.  These are the tabular and image counterpart
 :meth:`feature` accessor, so :mod:`otbound.bound` and :mod:`otbound.regularizer` apply
 unchanged.
 
-Both architectures take a ``residual`` flag.  As in the graph case (Appendix D.2), the
-regularization experiments enable it together with normalization, so that an 8-layer
+Both architectures take a ``residual`` flag.  As in the graph case, the regularization
+experiments enable it together with normalization (Appendix G.2), so that an 8-layer
 encoder trains stably and the regularizer's effect is not confounded with underfitting.
 """
 

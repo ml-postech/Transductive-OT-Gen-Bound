@@ -25,7 +25,7 @@ FixMatch                Sohn et al., 2020
 SimMatch                Zheng et al., 2022
 ======================  ================================================
 
-Appendix E.3 fixes the protocol: 2% of the pool labelled, class-balanced; each method
+Appendix H.3 fixes the protocol: 2% of the pool labelled, class-balanced; each method
 keeps the base architecture and default optimizer, learning rate and batch size from its
 own paper; reported accuracy is the median over the last few checkpoints, averaged over
 5 runs.

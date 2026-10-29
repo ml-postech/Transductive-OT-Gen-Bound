@@ -1,9 +1,9 @@
-"""Table 6 (Appendix C.1): rank correlation on transductive link prediction.
+"""Table 8 (Appendix E.1): rank correlation on transductive link prediction.
 
 Link prediction is the second transductive task with dependent features, and the bound
 transfers to it by treating an *edge* as the sample -- see :mod:`otbound.link`.
 
-Protocol from Appendix C.1: 30% of the observed edges are used for training and the
+Protocol from Appendix E.1: 30% of the observed edges are used for training and the
 remaining 70% for testing, with an equal number of negative edges sampled uniformly from
 non-edges; Adam at lr 0.01 with no weight decay for 500 epochs.  Sweep encoder depth over
 {1, 2, 4, 8, 16, 32} and predictor depth over {1, 2, 4} for the 18 configurations the

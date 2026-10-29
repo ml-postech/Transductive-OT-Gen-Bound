@@ -14,7 +14,8 @@ We bound the transductive generalization gap of a node classifier with optimal t
 
 - **Evaluating** the bound and measuring how well it rank-correlates with the empirical generalization gap (Table 1), on graphs, link prediction, and non-graph data.
 - **Analyzing depth.** Intra-class concentration $W_C$ and inter-class separation $W_S$ are tracked as message passing deepens (Figure 1). This accounts for the non-monotone relationship between depth and generalization.
-- **Regularizing** training with a differentiable surrogate of the bound (Table 2).
+- **Regularizing** training with a differentiable surrogate of the bound (Table 2), with ablations of its two factors (Table 12).
+- **The global bound** (Theorem 4), a coarser variant that compares the training and test feature distributions as wholes rather than class by class, both as a measure (Table 6) and as a regularizer (Table 7).
 - **Semi-supervised learning** with the regularizer added on top of standard SSL algorithms (Section 6; coming soon, see [Status](#status)).
 
 ## Installation
@@ -29,14 +30,14 @@ The code was tested with Python 3.8, PyTorch 1.13.1, PyTorch Geometric 2.4.0, PO
 
 ```
 ├── otbound/                  # library: everything the paper defines
-│   ├── splits.py             # data split π and estimation permutation π' (App. B)
+│   ├── splits.py             # data split π and estimation permutation π' (App. C)
 │   ├── wasserstein.py        # empirical W1: exact and Sinkhorn
 │   ├── margin.py             # margins and M_c(f, φ) (Thm. 1)
-│   ├── bound.py              # the OT bound (Thm. 1, App. B)
-│   ├── regularizer.py        # differentiable surrogate R (Sec. 5.2)
+│   ├── bound.py              # the OT bound (Thm. 1, App. C) and the global bound (Thm. 4, App. A)
+│   ├── regularizer.py        # differentiable surrogate R (Sec. 5.2) and its global variant (App. D.2)
 │   ├── depth.py              # W_C and W_S (Sec. 5.3)
 │   ├── baselines.py          # PAC-Bayes, Rademacher, uniform-stability baselines
-│   ├── link.py               # the bound for link prediction (App. C.1)
+│   ├── link.py               # the bound for link prediction (App. E.1)
 │   ├── models.py             # GNN encoders and classifiers
 │   ├── tabular.py            # MLP / CNN encoders for non-graph data
 │   ├── training.py           # training loops
@@ -44,11 +45,11 @@ The code was tested with Python 3.8, PyTorch 1.13.1, PyTorch Geometric 2.4.0, PO
 │   └── ssl/                  # semi-supervised hooks (Sec. 6)
 ├── experiments/              # one script per table / figure
 │   ├── correlation.py        # Table 1
-│   ├── depth.py              # Figure 1, App. C.3
+│   ├── depth.py              # Figure 1, App. E.2
 │   ├── regularize.py         # Table 2
-│   ├── link.py               # Table 6 (App. C.1)
-│   ├── tabular_correlation.py  # Tables 7, 8; Table 3 (supervised)
-│   ├── tabular_regularize.py   # Table 9; Table 4 (supervised)
+│   ├── link.py               # Table 8 (App. E.1)
+│   ├── tabular_correlation.py  # Tables 16, 17; Table 3 (supervised)
+│   ├── tabular_regularize.py   # Table 18; Table 4 (supervised)
 │   └── semisup.py            # Tables 3, 4 (semi-supervised) — skeleton
 ├── data/                     # Planetoid / Amazon (PyG downloads here if missing)
 └── new_data/                 # heterophilic graphs (.npz)
@@ -76,6 +77,15 @@ python experiments/correlation.py --dataset Cora --net gcn --e_depth 4 --c_depth
 python experiments/correlation.py --dataset Cora --net sgc --c_depth 0 --baseline_rc 1
 ```
 
+**Global bound vs. generalization gap (Table 6)**
+
+`--bound global` swaps in Theorem 4; `--bound both` reports it alongside Theorem 1 from the same trained model.
+
+```bash
+python experiments/correlation.py --dataset Cora --net gcn --e_depth 4 --c_depth 2 \
+    --bound global --global_quantile 0.9 --result_csv results/global_correlation.csv
+```
+
 **Depth analysis (Figure 1)**
 
 ```bash
@@ -92,13 +102,37 @@ python experiments/regularize.py --dataset roman-empire --net resgcn --reg_weigh
 python experiments/regularize.py --dataset roman-empire --net resgcn --regularizer None  # baseline
 ```
 
-**Link prediction (Table 6)**
+**Global regularizer (Table 7)**
+
+```bash
+python experiments/regularize.py --dataset roman-empire --net resgcn \
+    --regularizer global --global_quantile 0.9 --reg_weight 1e-3
+```
+
+**Ablation of the regularizer factors (Table 12)**
+
+`--reg_terms` keeps one factor of R and drops the other; the dropped factor is not computed, so the ablations are also cheaper.
+
+```bash
+python experiments/regularize.py --dataset Cora --net resgcn --reg_terms transport  # R_t
+python experiments/regularize.py --dataset Cora --net resgcn --reg_terms margin     # R_m
+```
+
+**Sensitivity analyses (Tables 13–15)**
+
+```bash
+for L in 1e-5 1e-4 1e-3 1e-2 1e-1; do python experiments/regularize.py --dataset Cora --net resgcn --reg_weight $L; done
+for E in 0.01 0.05 0.1 0.5;        do python experiments/regularize.py --dataset Cora --net resgcn --sinkhorn_eps $E; done
+for T in 1 2 4 8;                  do python experiments/regularize.py --dataset Cora --net resgcn --reg_n_perm $T; done
+```
+
+**Link prediction (Table 8)**
 
 ```bash
 python experiments/link.py --dataset Cora --net gcn --e_depth 2 --c_depth 1
 ```
 
-**Beyond graphs (Tables 7–9; supervised columns of Tables 3–4)**
+**Beyond graphs (Tables 16–18; supervised columns of Tables 3–4)**
 
 ```bash
 python experiments/tabular_correlation.py --dataset covtype --net mlp --e_depth 4 --c_depth 2
@@ -116,17 +150,24 @@ python experiments/tabular_regularize.py --dataset cifar10 --net rescnn --reg_we
 | `--train_rate` | labelled fraction of the transductive split (0 keeps the dataset's own split) | 0.3 |
 | `--use_val` | 1 for a 60/20/20 split with best-validation model selection | 0 |
 | `--runs` | number of random splits | 5 |
-| `--n_permutations` | number of π' samples used to estimate the bound (App. B) | 4 |
+| `--n_permutations` | number of π' samples used to estimate the bound (App. C) | 4 |
+| `--bound` | `classwise` (Thm. 1), `global` (Thm. 4), or `both` | `classwise` |
 | `--reg_weight` | λ in L = L_CE + λR | 1e-3 |
+| `--regularizer` | `ot` (Thm. 1), `global` (Thm. 4), or `None` | `ot` |
+| `--reg_terms` | `full`, `transport` or `margin` — which factor of R to keep (App. F.5) | `full` |
+| `--reg_n_perm` | π' samples averaged per gradient step, T (App. F.6) | 1 |
+| `--global_quantile` | order statistic standing in for the maximum in M(f, φ) | 0.9 |
 
 Each script sets its own defaults to match the protocol in the paper. Run `python experiments/<script>.py --help` for the full list.
 
 ## Status
 
 - [x] OT bound, oracle and test-blind estimators (Theorem 1)
+- [x] Global bound (Theorem 4), as a measure and as a regularizer
 - [x] Baselines: PAC-Bayes, Rademacher, uniform stability
 - [x] Depth analysis ($W_C$, $W_S$)
 - [x] OT regularizer: graphs, tabular and image data
+- [x] Regularizer factor ablation and hyperparameter sensitivity
 - [x] Link prediction
 - [ ] Semi-supervised experiments (Section 6). `otbound/ssl/buffer.py` and `otbound/ssl/regularizer.py` are complete. The four SSL algorithms in `otbound/ssl/algorithms.py` and the data pipeline in `experiments/semisup.py` are still skeletons and raise `NotImplementedError`; the full implementation will be added soon.
 

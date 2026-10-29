@@ -1,13 +1,13 @@
-"""Tables 7 and 8, and the supervised columns of Table 3: correlation beyond graphs.
+"""Tables 16 and 17, and the supervised columns of Table 3: correlation beyond graphs.
 
 Nothing about the bound is graph-specific, so the same measurement is run on tabular and
-image data with MLP and CNN encoders.  Appendix D.1 fixes the protocol: 30% of the pool
+image data with MLP and CNN encoders.  Appendix G.1 fixes the protocol: 30% of the pool
 labelled, Adam at lr 0.01, hidden dimension 64, 500 epochs, and 18 configurations per
 (dataset, architecture) from encoder depth {1, 2, 4, 8, 16, 32} crossed with classifier
 depth {1, 2, 4}.  The rank correlation is taken across those 18 rows.
 
-Datasets in the paper: ``breast_cancer``, ``letter``, ``covtype`` (Table 7);
-``digits``, ``mnist``, ``fashion_mnist`` (Table 8); ``cifar10``, ``svhn`` (Table 3,
+Datasets in the paper: ``breast_cancer``, ``letter``, ``covtype`` (Table 16);
+``digits``, ``mnist``, ``fashion_mnist`` (Table 17); ``cifar10``, ``svhn`` (Table 3,
 supervised).
 
 ``--bound_max_samples`` caps how many points the bound is evaluated on at once; the
@@ -22,7 +22,7 @@ import torch
 from _common import (SEEDS, append_csv_row, get_device, summarize)
 
 from otbound.baselines import pac_bayes_bound
-from otbound.bound import ot_bound_subsampled
+from otbound.bound import global_bound_subsampled, ot_bound_subsampled
 from otbound.data import TABULAR_DATASETS, TabularDataset
 from otbound.margin import margins_all, margins_true
 from otbound.tabular import TABULAR_NETS, batched_forward, build_tabular_model
@@ -77,21 +77,38 @@ def run_once(args, dataset, device, seed):
 
     margin_all = margins_all(logits if logits.dim() > 1
                              else torch.stack([-logits, logits], dim=-1))
-    bounds = ot_bound_subsampled(
-        features, margin_all, y, train_mask, test_mask, dataset.num_classes,
-        max_samples=args.bound_max_samples, max_batches=args.bound_max_batches,
-        seed=seed, n_permutations=args.n_permutations, gamma=args.gamma,
-    )
-    if bounds["n_blocks"] > 1:
-        print("  bound evaluated on {} disjoint blocks of <= {} points".format(
-            bounds["n_blocks"], args.bound_max_samples))
 
-    return {
+    result = {
         "gen_error": abs(test_err - train_err),
         "train_error": train_err, "test_error": test_err,
-        "ot_oracle": bounds["oracle"], "ot_bound": bounds["test_blind"],
-        "pac_bound": pac_bayes_bound(model, int(train_mask.sum())),
     }
+    blocks = None
+
+    if args.bound in ("classwise", "both"):
+        bounds = ot_bound_subsampled(
+            features, margin_all, y, train_mask, test_mask, dataset.num_classes,
+            max_samples=args.bound_max_samples, max_batches=args.bound_max_batches,
+            seed=seed, n_permutations=args.n_permutations, gamma=args.gamma,
+        )
+        result["ot_oracle"] = bounds["oracle"]
+        result["ot_bound"] = bounds["test_blind"]
+        blocks = bounds["n_blocks"]
+
+    if args.bound in ("global", "both"):
+        gbounds = global_bound_subsampled(
+            features, margin_all, y, train_mask, test_mask,
+            max_samples=args.bound_max_samples, max_batches=args.bound_max_batches,
+            seed=seed, quantile=args.global_quantile, gamma=args.gamma,
+        )
+        result["global_bound"] = gbounds["bound"]
+        blocks = gbounds["n_blocks"]
+
+    if blocks and blocks > 1:
+        print("  bound evaluated on {} disjoint blocks of <= {} points".format(
+            blocks, args.bound_max_samples))
+
+    result["pac_bound"] = pac_bayes_bound(model, int(train_mask.sum()))
+    return result
 
 
 def main():
@@ -99,6 +116,11 @@ def main():
     add_tabular_args(parser)
     parser.add_argument("--n_permutations", type=int, default=4)
     parser.add_argument("--gamma", type=float, default=1.0)
+    parser.add_argument("--bound", type=str, default="classwise",
+                        choices=["classwise", "global", "both"],
+                        help="'classwise' is Theorem 1, 'global' Theorem 4 (Appendix A)")
+    parser.add_argument("--global_quantile", type=float, default=0.9,
+                        help="order statistic standing in for the maximum in M(f, phi)")
     parser.add_argument("--bound_max_samples", type=int, default=4000,
                         help="points per block when evaluating the bound; 0 for all")
     parser.add_argument("--bound_max_batches", type=int, default=0,

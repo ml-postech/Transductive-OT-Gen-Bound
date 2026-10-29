@@ -19,7 +19,7 @@ imbalance between the splits and vanishes for class-balanced splits; :math:`\\va
 is model-agnostic.  Neither can change the ranking of architectures on a fixed dataset,
 so both are reported separately -- see :func:`imbalance_term` and :func:`epsilon_delta`.
 
-Following Appendix B, the expectation over :math:`\\pi'` is estimated by averaging over
+Following Appendix C, the expectation over :math:`\\pi'` is estimated by averaging over
 ``n_permutations`` samples (the paper uses ``T = 4``) in one of two ways:
 
 **OT-oracle**
@@ -32,12 +32,16 @@ Following Appendix B, the expectation over :math:`\\pi'` is estimated by averagi
 
 Both share :mod:`otbound.splits` for the :math:`\\pi'` draw and :mod:`otbound.margin` for
 :math:`M_c`; they differ by one argument.
+
+:func:`global_bound` at the end of this module implements Theorem 4 (Appendix A), the
+coarser bound that compares the training and test feature distributions as wholes rather
+than class by class.
 """
 
 import numpy as np
 import torch
 
-from .margin import change_rate_support, max_change_class
+from .margin import change_rate_support, global_change_rate, max_change_class
 from .splits import classwise_index_sets, sample_pi_prime
 from .wasserstein import w1_exact
 
@@ -49,6 +53,9 @@ __all__ = [
     "epsilon_delta",
     "inter_class_separation",
     "ot_bound_subsampled",
+    "global_bound",
+    "global_bound_subsampled",
+    "proportional_blocks",
 ]
 
 
@@ -86,7 +93,7 @@ def expected_wasserstein_per_class(features, y, train_mask, test_mask, num_class
             ``test_blind`` is true).
         train_mask, test_mask: the data split :math:`\\pi`.
         num_classes: :math:`K`.
-        n_permutations: number of :math:`\\pi'` samples, :math:`T` in Appendix B.
+        n_permutations: number of :math:`\\pi'` samples, :math:`T` in Appendix C.
         test_blind: ``True`` for the OT bound, ``False`` for OT-oracle.
         w1_fn: the :math:`W_1` estimator; :func:`otbound.wasserstein.w1_exact` by default.
         max_resample: a :math:`\\pi'` draw that leaves some class empty on either side
@@ -265,32 +272,7 @@ def ot_bound_subsampled(features, margin_all, y, train_mask, test_mask, num_clas
         dict: the same keys as :func:`ot_bound`, with the per-class vectors averaged
         across blocks as well.
     """
-    train_idx = train_mask.nonzero(as_tuple=True)[0].cpu().numpy()
-    test_idx = test_mask.nonzero(as_tuple=True)[0].cpu().numpy()
-    n_train, n_test = len(train_idx), len(test_idx)
-    n_total = n_train + n_test
-
-    if max_samples <= 0 or n_total <= max_samples:
-        blocks = [(train_idx, test_idx)]
-    else:
-        rng = np.random.RandomState(seed)
-        train_perm = rng.permutation(train_idx)
-        test_perm = rng.permutation(test_idx)
-        train_per_block = max(1, int(round(max_samples * n_train / n_total)))
-        test_per_block = max(1, max_samples - train_per_block)
-        n_blocks = max(
-            -(-n_train // train_per_block), -(-n_test // test_per_block)
-        )
-        if max_batches > 0:
-            n_blocks = min(n_blocks, max_batches)
-        blocks = []
-        for b in range(n_blocks):
-            tr = train_perm[b * train_per_block:(b + 1) * train_per_block]
-            te = test_perm[b * test_per_block:(b + 1) * test_per_block]
-            if len(tr) == 0 or len(te) == 0:
-                break
-            blocks.append((tr, te))
-
+    blocks = proportional_blocks(train_mask, test_mask, max_samples, max_batches, seed)
     device = features.device
     totals = {"oracle": 0.0, "test_blind": 0.0}
     vectors = {"max_change": 0.0, "expected_w1_oracle": 0.0,
@@ -315,5 +297,127 @@ def ot_bound_subsampled(features, margin_all, y, train_mask, test_mask, num_clas
 
     out = {k: v / weight_total for k, v in totals.items()}
     out.update({k: v / weight_total for k, v in vectors.items()})
+    out["n_blocks"] = len(blocks)
+    return out
+
+
+# ============================================================================
+# The global bound  (Theorem 4, Appendix A)
+# ============================================================================
+
+def global_bound(features, margin_all, y, train_mask, test_mask, quantile=0.9,
+                 gamma=1.0, w1_fn=w1_exact, batch_size=None, generator=None):
+    """Theorem 4: the generalization gap bounded by one *global* transport term.
+
+    .. math::
+
+        R_u(f \\circ \\phi; \\pi) - R_{m,\\gamma}(f \\circ \\phi; \\pi)
+        \;\\le\; \\frac{M(f, \\phi)}{\\gamma}\\,
+            W\\!\\big( \\phi_\\# \\mu_{I^{(\\pi)}_{\\mathrm{train}}},\\,
+                      \\phi_\\# \\mu_{I^{(\\pi)}_{\\mathrm{test}}} \\big)
+
+    Where Theorem 1 splits the transport cost by class, this compares the training and
+    test feature distributions as wholes.  That makes it cheaper -- a single
+    :math:`W_1`, no expectation over :math:`\\pi'` -- and it needs no test labels, since
+    the test side of :math:`M(f, \\phi)` enumerates every hypothetical label.  What it
+    gives up is the concentration/separation decomposition that Theorem 1 provides, so it
+    says less about *why* a model generalizes.
+
+    Args:
+        quantile: passed to :func:`otbound.margin.global_change_rate`.  ``1.0`` gives
+            :math:`M(f, \\phi)` as stated and hence a valid upper bound; the Appendix D
+            experiments use **0.9**, which trades validity for a quantity that tracks the
+            empirical gap more closely.
+        gamma: margin threshold; the bound carries a :math:`1/\\gamma` factor.
+
+    Returns:
+        dict with ``bound``, the ``change_rate`` factor and the ``w1`` term, so the two
+        can be inspected separately.
+    """
+    change_rate = global_change_rate(
+        features, margin_all, y, train_mask, test_mask, quantile=quantile,
+        batch_size=batch_size, generator=generator,
+    )
+    features_np = features.detach().cpu().numpy()
+    w1 = w1_fn(features_np[train_mask.cpu().numpy()], features_np[test_mask.cpu().numpy()])
+
+    return {
+        "bound": float(change_rate * w1 / gamma),
+        "change_rate": float(change_rate),
+        "w1": float(w1),
+    }
+
+
+def proportional_blocks(train_mask, test_mask, max_samples=0, max_batches=0, seed=0):
+    """Cut the sample set into disjoint blocks that each preserve the train/test ratio.
+
+    Both the exact :math:`W_1` solver and the pairwise change-rate matrix are quadratic
+    in the number of points, so the larger datasets have to be evaluated in pieces.
+    Blocks are *disjoint* rather than resampled, so each point contributes exactly once,
+    and *proportional*, so every block poses the same estimation problem as the whole.
+
+    Args:
+        max_samples: points per block; ``0`` returns a single block with everything.
+        max_batches: cap on the number of blocks; ``0`` covers the data.  A cap trades
+            coverage for time, and callers should say so when reporting.
+        seed: controls the shuffle that assigns points to blocks.
+
+    Returns:
+        list of ``(train_indices, test_indices)`` numpy array pairs.
+    """
+    train_idx = train_mask.nonzero(as_tuple=True)[0].cpu().numpy()
+    test_idx = test_mask.nonzero(as_tuple=True)[0].cpu().numpy()
+    n_train, n_test = len(train_idx), len(test_idx)
+    n_total = n_train + n_test
+
+    if max_samples <= 0 or n_total <= max_samples:
+        return [(train_idx, test_idx)]
+
+    rng = np.random.RandomState(seed)
+    train_perm = rng.permutation(train_idx)
+    test_perm = rng.permutation(test_idx)
+    train_per_block = max(1, int(round(max_samples * n_train / n_total)))
+    test_per_block = max(1, max_samples - train_per_block)
+    n_blocks = max(-(-n_train // train_per_block), -(-n_test // test_per_block))
+    if max_batches > 0:
+        n_blocks = min(n_blocks, max_batches)
+
+    blocks = []
+    for b in range(n_blocks):
+        tr = train_perm[b * train_per_block:(b + 1) * train_per_block]
+        te = test_perm[b * test_per_block:(b + 1) * test_per_block]
+        if len(tr) == 0 or len(te) == 0:
+            break
+        blocks.append((tr, te))
+    return blocks
+
+
+def global_bound_subsampled(features, margin_all, y, train_mask, test_mask,
+                            max_samples=0, max_batches=0, seed=0, **kwargs):
+    """:func:`global_bound` averaged over the blocks of :func:`proportional_blocks`.
+
+    The counterpart of :func:`ot_bound_subsampled` for Theorem 4, needed on the tabular
+    and image benchmarks where the full train-by-test rate matrix and :math:`W_1` are out
+    of reach.
+    """
+    blocks = proportional_blocks(train_mask, test_mask, max_samples, max_batches, seed)
+    device = features.device
+
+    totals = {"bound": 0.0, "change_rate": 0.0, "w1": 0.0}
+    weight_total = 0
+
+    for tr, te in blocks:
+        idx = torch.as_tensor(np.concatenate([tr, te]), device=device, dtype=torch.long)
+        n_block = len(idx)
+        block_train = torch.zeros(n_block, dtype=torch.bool, device=device)
+        block_train[:len(tr)] = True
+
+        result = global_bound(features[idx], margin_all[idx], y[idx], block_train,
+                              ~block_train, **kwargs)
+        for key in totals:
+            totals[key] += result[key] * n_block
+        weight_total += n_block
+
+    out = {k: v / weight_total for k, v in totals.items()}
     out["n_blocks"] = len(blocks)
     return out

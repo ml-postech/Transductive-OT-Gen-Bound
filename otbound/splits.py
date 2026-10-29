@@ -5,7 +5,7 @@ Two distinct notions of "split" live here, and keeping them apart matters:
 ``pi`` (the *data* split)
     The transductive train/test split of the dataset itself, denoted :math:`\\pi` in
     the paper.  Nodes in ``I_train`` have observed labels; nodes in ``I_test`` do not.
-    Following Appendix E.1, we use 30% train / 70% test for the correlation and depth
+    Following Appendix H.1, we use 30% train / 70% test for the correlation and depth
     experiments.
 
 ``pi_prime`` (the *estimation* permutation)
@@ -21,7 +21,7 @@ They differ only in *how* a sample is drawn:
 ===========================  ==========================================================
 :func:`sample_pi_prime`      Plain :math:`\\pi'`: a uniform permutation over all nodes,
                              split at :math:`m : u`.  Used by the bound, which can
-                             afford ``T`` samples (default ``T = 4``, Appendix B).
+                             afford ``T`` samples (default ``T = 4``, Appendix C).
 :func:`stratified_class_split`  The class-stratified counterpart: within one class,
                              split the labelled nodes at the same :math:`m : u` ratio.
                              Used by the regularizer, which draws a single sample per
@@ -75,7 +75,7 @@ def random_planetoid_splits(data, seed=12134):
 def random_split_wo_valid(data, train_rate, seed=12134):
     """``train_rate`` / ``1 - train_rate`` split with no validation set.
 
-    This is the transductive protocol of Appendix E.1: ``train_rate = 0.3``.
+    This is the transductive protocol of Appendix H.1: ``train_rate = 0.3``.
     """
     train_lb = int(round(train_rate * len(data.y)))
 
@@ -138,7 +138,7 @@ def sample_pi_prime(pool_mask, num_train, device, seed=None):
 def classwise_index_sets(class_mask, pi_train_mask, pi_test_mask, known_mask=None):
     """Class-``c`` index sets under :math:`\\pi'`, for one of the two estimators.
 
-    With ``known_mask=None`` this is the **OT-oracle** of Appendix B: every label is
+    With ``known_mask=None`` this is the **OT-oracle** of Appendix C: every label is
     assumed available, so
 
     .. math:: I^{(\\pi')}_{\\mathrm{train},c},\\quad I^{(\\pi')}_{\\mathrm{test},c}

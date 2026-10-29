@@ -1,4 +1,4 @@
-"""Link prediction model and edge-level sample construction (Appendix C.1).
+"""Link prediction model and edge-level sample construction (Appendix E.1).
 
 Link prediction is the second transductive task in the paper, and it has the same
 feature-dependency problem as node classification: the encoder sees the whole observed

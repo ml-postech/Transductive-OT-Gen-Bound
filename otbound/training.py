@@ -23,7 +23,7 @@ __all__ = ["TrainHistory", "train_graph_model", "evaluate_graph_model", "task_lo
 class TrainHistory(object):
     """Per-epoch curves and the best validation score seen.
 
-    ``train_acc`` and ``train_loss`` are what Appendix C.2 plots to show that
+    ``train_acc`` and ``train_loss`` are what Appendix F.1 plots to show that
     Amazon-ratings fails to fit its training set, the regime where regularization is not
     expected to help.
     """

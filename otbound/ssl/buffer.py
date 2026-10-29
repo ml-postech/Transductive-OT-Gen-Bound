@@ -1,8 +1,8 @@
-"""Labelled-feature buffer for the semi-supervised regularizer (Appendix E.3).
+"""Labelled-feature buffer for the semi-supervised regularizer (Appendix H.3).
 
 In the 2%-label regime of Section 6 a mini-batch holds only a handful of labelled
 samples per class -- far too few for a stable per-class :math:`W_1`, which is what
-:math:`R` needs.  Appendix E.3 works around this by keeping the labelled features of
+:math:`R` needs.  Appendix H.3 works around this by keeping the labelled features of
 the most recent few mini-batches and concatenating them with the current batch before
 computing :math:`R`.
 
@@ -21,7 +21,7 @@ class LabeledFeatureBuffer:
     """Ring buffer over the last ``capacity`` mini-batches of labelled features.
 
     Args:
-        capacity: number of past mini-batches to retain.  Appendix E.3 uses 4.
+        capacity: number of past mini-batches to retain.  Appendix H.3 uses 4.
 
     Typical use inside a training step::
 

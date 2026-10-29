@@ -23,7 +23,7 @@ SEEDS = [
 ]
 
 __all__ = ["REPO_ROOT", "SEEDS", "add_common_args", "add_regularizer_args",
-           "get_device", "append_csv_row", "summarize"]
+           "regularizer_kwargs", "get_device", "append_csv_row", "summarize"]
 
 
 def add_common_args(parser):
@@ -76,12 +76,28 @@ def add_common_args(parser):
 
 
 def add_regularizer_args(parser):
-    """Arguments controlling the Section 5.2 regularizer."""
+    """Arguments controlling the regularizer (Section 5.2, Appendices D.2, F.5, F.6)."""
     group = parser.add_argument_group("regularizer")
-    group.add_argument("--regularizer", type=str, default="ot", choices=["None", "ot"],
-                       help="'None' trains the unregularized baseline")
+    group.add_argument("--regularizer", type=str, default="ot",
+                       choices=["None", "ot", "global"],
+                       help="'ot' is the class-wise regularizer of Theorem 1 (Table 2), "
+                            "'global' the one of Theorem 4 (Appendix D.2), "
+                            "'None' the unregularized baseline")
     group.add_argument("--reg_weight", type=float, default=1e-3,
                        help="lambda in L = L_task + lambda * R")
+    group.add_argument("--reg_terms", type=str, default="full",
+                       choices=["full", "transport", "margin"],
+                       help="which factors of R to keep (Appendix F.5 ablation): "
+                            "'full' = sum_c M_c E[(m_c/m) W1], "
+                            "'transport' = sum_c E[(m_c/m) W1], 'margin' = sum_c M_c. "
+                            "Ignored by --regularizer global")
+    group.add_argument("--reg_n_perm", type=int, default=1,
+                       help="stratified pi' samples averaged per gradient step, T "
+                            "(Appendix H.1 uses 1; Appendix F.6 sweeps it). "
+                            "Ignored by --regularizer global, which draws no pi'")
+    group.add_argument("--global_quantile", type=float, default=0.9,
+                       help="order statistic of the change-rate distribution standing in "
+                            "for the maximum in M(f, phi); only for the global variant")
     group.add_argument("--sinkhorn_eps", type=float, default=0.05,
                        help="entropic regularization of the Sinkhorn W1 surrogate")
     group.add_argument("--sinkhorn_iter", type=int, default=50)
@@ -90,6 +106,24 @@ def add_regularizer_args(parser):
     group.add_argument("--reg_n_sample", type=int, default=200,
                        help="points sampled per class when estimating M_c")
     return parser
+
+
+def regularizer_kwargs(args):
+    """Translate parsed arguments into keyword arguments for the regularizers.
+
+    Keeps the two variants' differing signatures in one place: the class-wise one takes
+    ``terms`` and ``n_permutations``, the global one takes ``quantile``.
+    """
+    shared = dict(
+        sinkhorn_eps=args.sinkhorn_eps,
+        sinkhorn_iter=args.sinkhorn_iter,
+        soft_temp=args.soft_temp,
+        n_sample=args.reg_n_sample,
+    )
+    if args.regularizer == "global":
+        return dict(variant="global", quantile=args.global_quantile, **shared)
+    return dict(variant="classwise", terms=args.reg_terms,
+                n_permutations=args.reg_n_perm, **shared)
 
 
 def get_device(args):

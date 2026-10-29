@@ -1,9 +1,9 @@
-"""Table 9, and the supervised columns of Table 4: the OT regularizer beyond graphs.
+"""Table 18, and the supervised columns of Table 4: the OT regularizer beyond graphs.
 
 Same surrogate :math:`R` as the graph experiments -- :func:`otbound.regularizer.ot_regularizer`
 is called directly -- applied to MLP and CNN encoders on image-shaped data.
 
-Appendix D.2 fixes the protocol: encoder depth 8, classifier depth 2, hidden dimension
+Appendix G.2 fixes the protocol: encoder depth 8, classifier depth 2, hidden dimension
 64, skip connections and batch normalization on every encoder (use ``--net resmlp`` or
 ``--net rescnn`` with ``--layernorm BatchNorm``), :math:`\\lambda` chosen from
 ``{1e-1, ..., 1e-4}`` on a validation set, 5 seeds.
@@ -21,11 +21,12 @@ import argparse
 
 from tabular_correlation import add_tabular_args
 
-from _common import (SEEDS, add_regularizer_args, append_csv_row, get_device, summarize)
+from _common import (SEEDS, add_regularizer_args, append_csv_row, get_device,
+                     regularizer_kwargs, summarize)
 
 from otbound.data import TabularDataset
 from otbound.margin import margins_all
-from otbound.regularizer import ot_regularizer
+from otbound.regularizer import global_ot_regularizer, ot_regularizer
 from otbound.tabular import build_tabular_model
 from otbound.training import train_tabular_model
 
@@ -33,26 +34,24 @@ from otbound.training import train_tabular_model
 def make_regularizer_fn(args, num_classes, train_ratio):
     """Build the hook the tabular training loop calls each step.
 
-    Returns ``None`` for the baseline.
+    Dispatches on ``--regularizer`` exactly as the graph version does; returns ``None``
+    for the baseline.
     """
     if args.regularizer == "None" or args.reg_weight == 0:
         return None
 
+    kwargs = regularizer_kwargs(args)
+    variant = kwargs.pop("variant")
+
     def regularizer_fn(train_features, train_logits, train_y,
                        test_features, test_logits):
-        reg = ot_regularizer(
-            train_features=train_features,
-            train_margin_all=margins_all(train_logits),
-            train_y=train_y,
-            test_features=test_features,
-            test_margin_all=margins_all(test_logits),
-            num_classes=num_classes,
-            train_ratio=train_ratio,
-            sinkhorn_eps=args.sinkhorn_eps,
-            sinkhorn_iter=args.sinkhorn_iter,
-            soft_temp=args.soft_temp,
-            n_sample=args.reg_n_sample,
-        )
+        labeled = (train_features, margins_all(train_logits), train_y)
+        unlabeled = (test_features, margins_all(test_logits))
+        if variant == "global":
+            reg = global_ot_regularizer(*labeled, *unlabeled, **kwargs)
+        else:
+            reg = ot_regularizer(*labeled, *unlabeled, num_classes=num_classes,
+                                 train_ratio=train_ratio, **kwargs)
         return args.reg_weight * reg
 
     return regularizer_fn
@@ -96,11 +95,16 @@ def main():
             run + 1, args.runs, history.best_test_acc, history.epochs_run))
 
     mean, std = summarize(test_accs)
+    label = args.regularizer
+    if args.regularizer == "ot" and args.reg_terms != "full":
+        label += " ({}-only)".format(args.reg_terms)
     print("\n{} + {} on {}: test accuracy {:.2f} +- {:.2f}".format(
-        args.net, args.regularizer, args.dataset, 100 * mean, 100 * std))
+        args.net, label, args.dataset, 100 * mean, 100 * std))
 
     append_csv_row(args.result_csv, {
         "net": args.net, "dataset": args.dataset, "regularizer": args.regularizer,
+        "reg_terms": args.reg_terms, "reg_n_perm": args.reg_n_perm,
+        "global_quantile": args.global_quantile,
         "reg_weight": args.reg_weight, "lr": args.lr,
         "e_depth": args.e_depth, "c_depth": args.c_depth,
         "test_acc_mean": round(100 * mean, 4), "test_acc_std": round(100 * std, 4),

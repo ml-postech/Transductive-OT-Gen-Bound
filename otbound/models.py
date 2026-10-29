@@ -10,7 +10,7 @@ model exposes :meth:`feature` alongside :meth:`forward`.
 ``gcn`` / ``gat`` / ``sage`` / ``sgc`` / ``gcn2``
     the message passing operator.
 ``res`` prefix (``resgcn``, ``resgat``, ``ressage``)
-    add a residual connection around each layer.  Appendix E.1 uses these for the
+    add a residual connection around each layer.  Appendix H.1 uses these for the
     regularization experiments, where an 8-layer encoder without skips underfits and
     would confound the regularizer's effect with plain optimization failure.
 ``mlp`` suffix
