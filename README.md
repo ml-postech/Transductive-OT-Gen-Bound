@@ -16,7 +16,7 @@ We bound the transductive generalization gap of a node classifier with optimal t
 - **Analyzing depth.** Intra-class concentration $W_C$ and inter-class separation $W_S$ are tracked as message passing deepens (Figure 1). This accounts for the non-monotone relationship between depth and generalization.
 - **Regularizing** training with a differentiable surrogate of the bound (Table 2), with ablations of its two factors (Table 12).
 - **The global bound** (Theorem 4), a coarser variant that compares the training and test feature distributions as wholes rather than class by class, both as a measure (Table 6) and as a regularizer (Table 7).
-- **Semi-supervised learning** with the regularizer added on top of standard SSL algorithms (Section 6). The hooks this needs are in `otbound/ssl/`; the SSL algorithms themselves are not included yet, so `experiments/semisup.py` is a skeleton and raises `NotImplementedError`.
+- **Semi-supervised learning** with the regularizer added on top of standard SSL algorithms (Section 6). The bound and the regularizer are evaluated on top of LP-DeepSSL, Mean Teacher, FixMatch and SimMatch on CIFAR-10 and SVHN (Tables 3 and 4); the code is in `experiments/semisup/`, with the regularizer in `otbound/ssl/`.
 
 ## Installation
 
@@ -43,6 +43,8 @@ The code was tested with Python 3.8, PyTorch 1.13.1, PyTorch Geometric 2.4.0, PO
 │   ├── training.py           # training loops
 │   ├── data.py               # dataset loading and splits
 │   └── ssl/                  # semi-supervised hooks (Sec. 6)
+│       ├── regularizer.py    #   R in a 2%-label mini-batch
+│       └── buffer.py         #   labelled-feature buffer
 ├── experiments/              # one script per table / figure
 │   ├── correlation.py        # Table 1
 │   ├── depth.py              # Figure 1, App. E.2
@@ -50,7 +52,13 @@ The code was tested with Python 3.8, PyTorch 1.13.1, PyTorch Geometric 2.4.0, PO
 │   ├── link.py               # Table 8 (App. E.1)
 │   ├── tabular_correlation.py  # Tables 16, 17; Table 3 (supervised)
 │   ├── tabular_regularize.py   # Table 18; Table 4 (supervised)
-│   └── semisup.py            # Tables 3, 4 (semi-supervised) — skeleton
+│   └── semisup/              # Tables 3, 4 (semi-supervised)
+│       ├── README.md         #   training and evaluation commands
+│       ├── correlation.py    #   Table 3 (semi-supervised): gap and bounds of a checkpoint
+│       ├── accuracy.py       #   Table 4 (semi-supervised): accuracy from training logs
+│       ├── LP-DeepSSL/       #   LP-DeepSSL and Mean Teacher, adapted from the official code
+│       ├── FixMatch/         #   FixMatch and SimMatch, adapted from the official code
+│       └── bound_utils.py, prepare_data.py
 ├── data/                     # Planetoid / Amazon (PyG downloads here if missing)
 └── new_data/                 # heterophilic graphs (.npz)
 ```
@@ -60,6 +68,7 @@ The code was tested with Python 3.8, PyTorch 1.13.1, PyTorch Geometric 2.4.0, PO
 - **Planetoid** (`Cora`, `CiteSeer`, `PubMed`) and **Amazon** (`Computers`, `Photo`) are read from `data/`. PyG downloads them there if they are missing.
 - **Heterophilic graphs** (`squirrel`, `squirrel-filtered`, `chameleon`, `chameleon-filtered`, `roman-empire`, `amazon-ratings`, `minesweeper`, `tolokers`, `questions`) are read from the `.npz` files in `new_data/`. These are the files released by [Platonov et al. (2023)](https://github.com/yandex-research/heterophilous-graphs).
 - **Non-graph data** (`iris`, `wine`, `breast_cancer`, `digits`, `covtype`, `letter`, `mnist`, `fashion_mnist`, `cifar10`, `svhn`) are fetched by scikit-learn, OpenML or torchvision on first use.
+- **Semi-supervised experiments** read CIFAR-10 and SVHN as PNG folders, which `python experiments/semisup/prepare_data.py --root data` writes to `data/{cifar10,svhn}/by-image/`, where `all/` is the transductive pool (60,000 / 99,289 images). The labelled subsets (class-balanced, 1,200 and 2,000 images) are fixed in `experiments/semisup/LP-DeepSSL/data-local/labels/`.
 
 Use `--data_root` and `--hetero_root` to point to other locations.
 
@@ -137,6 +146,24 @@ python experiments/link.py --dataset Cora --net gcn --e_depth 2 --c_depth 1
 ```bash
 python experiments/tabular_correlation.py --dataset covtype --net mlp --e_depth 4 --c_depth 2
 python experiments/tabular_regularize.py --dataset cifar10 --net rescnn --reg_weight 1e-3
+```
+
+**Semi-supervised learning (Tables 3 and 4)**
+
+Each algorithm is trained with its own script under `experiments/semisup/` (`--reg_weight` adds the OT regularizer); `correlation.py` evaluates the bound of a checkpoint and `accuracy.py` collects the Table 4 accuracies from the training logs. [`experiments/semisup/README.md`](experiments/semisup/README.md) lists the commands for all four algorithms.
+
+```bash
+python experiments/semisup/prepare_data.py --root data   # CIFAR-10 / SVHN as PNG folders
+
+# Table 3: train one architecture, then append its gap / PAC / OT-oracle / OT bound to the CSV
+python experiments/semisup/FixMatch/train.py --dataset cifar10 --model-depth 28 --model-width 2
+python experiments/semisup/correlation.py --algo fixmatch --dataset cifar10 --e_depth 28 --width 2 \
+    --checkpoint results/semisup/fixmatch_cifar10_d28_w2_cd1/model_best.pth.tar --result_csv results/semisup/table3.csv
+
+# Table 4: train with and without R (--reg_weight 0) for each seed, then average the logs
+mkdir -p results/semisup/logs
+python experiments/semisup/FixMatch/train.py --dataset cifar10 --reg_weight 1e-4 --seed 1 2>&1 | tee results/semisup/logs/fixmatch_seed1.log
+python experiments/semisup/accuracy.py results/semisup/logs/fixmatch_seed*.log
 ```
 
 ### Common arguments

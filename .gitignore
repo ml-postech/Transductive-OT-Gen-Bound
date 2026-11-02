@@ -72,3 +72,7 @@ data/**/raw/*.pt
 results/
 
 camera_ready.pdf
+# Semi-supervised experiments (experiments/semisup)
+data/cifar10/
+data/svhn/
+experiments/semisup/LP-DeepSSL/models/

@@ -1,64 +1,65 @@
-"""Applying the OT regularizer inside a semi-supervised training step (Section 6).
+import torch
 
-The regularizer itself is unchanged -- :func:`otbound.regularizer.ot_regularizer` is
-called directly.  Only the two inputs need care in the low-label regime:
-
-* the **labelled** side is widened with :class:`~otbound.ssl.buffer.LabeledFeatureBuffer`
-  so the per-class :math:`W_1` has enough points to be meaningful, and
-* the **unlabelled** side is the algorithm's current unlabelled batch, which every
-  method in Section 6 already forwards.  Only its features are read; its pseudo-labels
-  are not, so the regularizer stays label-free on that side.
-
-``train_ratio`` should be the labelled fraction of the whole pool (0.02 in Section 6),
-not the ratio within a batch: it defines the estimand, so batching must not change it.
-"""
-
-from ..margin import margins_all
-from ..regularizer import ot_regularizer
+from ..margin import margins_all, soft_max_change_class
+from ..wasserstein import sinkhorn_distance
 
 __all__ = ["ssl_ot_regularizer"]
 
 
-def ssl_ot_regularizer(labeled_features, labeled_logits, labeled_y,
-                       unlabeled_features, unlabeled_logits,
-                       num_classes, train_ratio, buffer=None, **reg_kwargs):
+def ssl_ot_regularizer(labeled_features, labeled_y, labeled_logits,
+                       unlabeled_features, unlabeled_logits, num_classes, buffer=None,
+                       sinkhorn_eps=0.05, sinkhorn_iter=50, soft_temp=1.0, n_sample=200):
     """Compute :math:`R` for one semi-supervised step.
 
     Args:
-        labeled_features, labeled_logits, labeled_y: the current labelled batch.
-        unlabeled_features, unlabeled_logits: the current unlabelled batch; labels and
-            pseudo-labels are never read.
+        labeled_features, labeled_y, labeled_logits: the current labelled batch (with grad).
+        unlabeled_features, unlabeled_logits: the current unlabelled batch (with grad).
         num_classes: :math:`K`.
-        train_ratio: labelled fraction of the full pool.
-        buffer: optional :class:`~otbound.ssl.buffer.LabeledFeatureBuffer`.  When given,
-            it is read before the step and updated after.
-        **reg_kwargs: forwarded to :func:`otbound.regularizer.ot_regularizer`
-            (``sinkhorn_eps``, ``soft_temp``, ``n_sample``, ...).
+        buffer: optional :class:`~otbound.ssl.buffer.LabeledFeatureBuffer`; read before
+            the step and updated after.
+        sinkhorn_eps, sinkhorn_iter: Sinkhorn entropic regularization and iteration count.
+        soft_temp: temperature of the smoothed maximum in :math:`M_c`.
+        n_sample: number of points sampled for the :math:`M_c` pair set.
 
     Returns:
-        torch.Tensor: the scalar :math:`R`, to be added to the algorithm's own loss as
+        torch.Tensor: the scalar :math:`R`, added to the algorithm's own loss as
         :math:`\\mathcal{L}_{\\mathrm{orig}} + \\lambda R`.
     """
+    device = labeled_features.device
+    if buffer is not None:
+        lab_features, lab_y = buffer.concat(labeled_features, labeled_y)
+        buffer.update(labeled_features, labeled_y)
+    else:
+        lab_features, lab_y = labeled_features, labeled_y
+
+    # pi' over labelled + unlabelled samples (labelled rows first); keep the labelled ones
+    m = lab_features.shape[0]
+    n = m + unlabeled_features.shape[0]
+    pi_train = torch.zeros(n, dtype=torch.bool, device=device)
+    pi_train[torch.randperm(n, device=device)[:m]] = True
+    pi_train = pi_train[:m]
+
     labeled_margins = margins_all(labeled_logits)
     unlabeled_margins = margins_all(unlabeled_logits)
 
-    if buffer is not None:
-        feats, margins, ys = buffer.concat(labeled_features, labeled_margins, labeled_y)
-    else:
-        feats, margins, ys = labeled_features, labeled_margins, labeled_y
+    terms = []
+    for c in range(num_classes):
+        train_c = (lab_y == c) & pi_train
+        test_c = (lab_y == c) & ~pi_train
+        if int(train_c.sum()) < 1 or int(test_c.sum()) < 1:
+            continue
+        w1_c = sinkhorn_distance(lab_features[train_c], lab_features[test_c],
+                                 epsilon=sinkhorn_eps, max_iter=sinkhorn_iter)
 
-    reg = ot_regularizer(
-        train_features=feats,
-        train_margin_all=margins,
-        train_y=ys,
-        test_features=unlabeled_features,
-        test_margin_all=unlabeled_margins,
-        num_classes=num_classes,
-        train_ratio=train_ratio,
-        **reg_kwargs,
-    )
+        cur_c = labeled_y == c
+        support_features = torch.cat([labeled_features[cur_c], unlabeled_features], dim=0)
+        support_margins = torch.cat([labeled_margins[cur_c], unlabeled_margins], dim=0)
+        if support_features.shape[0] < 2:
+            continue
+        mc_c = soft_max_change_class(support_features, support_margins, c,
+                                     temperature=soft_temp, n_sample=n_sample)
+        terms.append(float(train_c.sum()) / m * mc_c * w1_c)
 
-    if buffer is not None:
-        buffer.update(labeled_features, labeled_margins, labeled_y)
-
-    return reg
+    if not terms:
+        return labeled_features.new_zeros(())
+    return torch.stack(terms).sum()
